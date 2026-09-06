@@ -1,0 +1,18 @@
+<div style="max-width:620px;margin:0 auto;padding:28px 16px;font-family:Arial,sans-serif">
+  <div style="background:#0d4d45;color:#fff;padding:18px 24px;border-radius:10px 10px 0 0;font-size:20px;font-weight:700">
+    BNC
+  </div>
+  <div style="padding:26px 24px;border:1px solid #dce5e0;border-top:0;border-radius:0 0 10px 10px">
+    <h1 style="margin:0 0 20px;color:#0d4d45;font-size:22px">Your BNC membership is approved</h1>
+    <p style="color:#263b36;line-height:1.55">Hello {{ .Data.display_name }},</p>
+    <p style="color:#263b36;line-height:1.55">
+      Activate your account using the secure link below. You will be asked to set your password on first login.
+    </p>
+    <p style="margin:24px 0">
+      <a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#0d4d45;color:#fff;text-decoration:none;padding:11px 18px;border-radius:7px;font-weight:600">
+        Activate account
+      </a>
+    </p>
+    <p style="color:#6a7b76;font-size:13px">If you were not expecting this invitation, ignore this email.</p>
+  </div>
+</div>

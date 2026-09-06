@@ -1,0 +1,170 @@
+from urllib.parse import urlsplit
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse
+from fastapi.security import HTTPAuthorizationCredentials
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.api.dependencies import bearer, current_user
+from app.config.settings import get_settings
+from app.db.session import get_db
+from app.handlers.auth import AuthHandler
+from app.models.identity import Permission, Role, RolePermission, User
+from app.schemas.auth import (
+    AuthTokenOutput,
+    ChangePasswordInput,
+    CurrentUserOutput,
+    ForgotPasswordInput,
+    LoginInput,
+    OAuthSessionInput,
+    RecoverPasswordInput,
+    SetPasswordInput,
+)
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+handler = AuthHandler()
+
+
+def set_refresh_cookie(response: Response, refresh_token: str) -> None:
+    settings = get_settings()
+    response.set_cookie(
+        key=settings.auth_refresh_cookie_name,
+        value=refresh_token,
+        max_age=settings.auth_refresh_cookie_max_age,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite=settings.auth_cookie_samesite,
+        path="/api/v1/auth",
+    )
+
+
+def token_output(session) -> AuthTokenOutput:
+    return AuthTokenOutput(
+        access_token=session.access_token,
+        expires_in=session.expires_in,
+        password_setup_required=session.password_setup_required,
+    )
+
+
+@router.post("/login", response_model=AuthTokenOutput)
+def login(payload: LoginInput, response: Response, db: Session = Depends(get_db)):
+    session = handler.login(db, payload)
+    set_refresh_cookie(response, session.refresh_token)
+    return token_output(session)
+
+
+@router.post("/forgot-password", status_code=204)
+def forgot_password(payload: ForgotPasswordInput, db: Session = Depends(get_db)):
+    handler.request_password_reset(db, payload)
+
+
+@router.post("/password/recover", status_code=204)
+def recover_password(payload: RecoverPasswordInput, db: Session = Depends(get_db)):
+    handler.recover_password(db, payload)
+
+
+@router.post(
+    "/refresh",
+    response_model=AuthTokenOutput,
+    responses={204: {"description": "No active session"}},
+)
+def refresh(
+    request: Request, response: Response, db: Session = Depends(get_db)
+) -> AuthTokenOutput | Response:
+    settings = get_settings()
+    refresh_token = request.cookies.get(settings.auth_refresh_cookie_name)
+    if not refresh_token:
+        return Response(status_code=204)
+    try:
+        session = handler.refresh(db, refresh_token)
+    except HTTPException as exc:
+        if exc.status_code != 401:
+            raise
+        empty = Response(status_code=204)
+        empty.delete_cookie(
+            key=settings.auth_refresh_cookie_name,
+            path="/api/v1/auth",
+        )
+        return empty
+    set_refresh_cookie(response, session.refresh_token)
+    return token_output(session)
+
+
+@router.post("/oauth/session", response_model=AuthTokenOutput)
+def oauth_session(
+    payload: OAuthSessionInput, response: Response, db: Session = Depends(get_db)
+):
+    session = handler.accept_oauth_session(db, payload)
+    set_refresh_cookie(response, session.refresh_token)
+    return token_output(session)
+
+
+@router.post("/password", status_code=204)
+def set_password(
+    payload: SetPasswordInput,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    handler.set_password(db, user, credentials.credentials, payload.password)
+
+
+@router.post("/password/change", status_code=204)
+def change_password(
+    payload: ChangePasswordInput,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> None:
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    handler.change_password(db, user, credentials.credentials, payload)
+
+
+@router.get("/google")
+def google(return_to: str | None = None):
+    settings = get_settings()
+    target = return_to or settings.frontend_url
+    origin = f"{urlsplit(target).scheme}://{urlsplit(target).netloc}"
+    if origin not in settings.cors_origins:
+        raise HTTPException(status_code=400, detail="Invalid authentication return URL")
+    return RedirectResponse(handler.auth.google_authorize_url(target))
+
+
+@router.post("/logout", status_code=204)
+def logout(
+    response: Response,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+):
+    if credentials:
+        handler.auth.logout(credentials.credentials)
+    settings = get_settings()
+    response.delete_cookie(key=settings.auth_refresh_cookie_name, path="/api/v1/auth")
+
+
+@router.get("/me", response_model=CurrentUserOutput)
+def me(db: Session = Depends(get_db), user: User = Depends(current_user)) -> CurrentUserOutput:
+    role_code = db.scalar(select(Role.code).where(Role.id == user.role_id)) or ""
+    permissions = db.scalars(
+        select(Permission.code)
+        .join(RolePermission, RolePermission.permission_id == Permission.id)
+        .where(RolePermission.role_id == user.role_id, RolePermission.allowed.is_(True))
+        .order_by(Permission.code)
+    ).all()
+    return CurrentUserOutput(
+        id=str(user.id),
+        display_name=user.display_name,
+        email=user.email,
+        mobile=user.mobile,
+        status=user.status.value,
+        role_code=role_code,
+        permissions=list(permissions),
+        profile_picture_url=(
+            f"/api/v1/members/{user.id}/profile-picture"
+            if user.profile_picture_file_id
+            else None
+        ),
+    )
