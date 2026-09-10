@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.engines.payment_numbers import ledger_entry_no
-from app.models.enums import LedgerDirection
+from app.models.enums import LedgerDirection, UserStatus
 from app.models.expense_reversals import ExpenseReversal
 from app.models.expenses import Expense
 from app.models.fund import FundAccount, FundEntry
@@ -31,7 +31,7 @@ class ExpenseService:
             )
         if payload.responsible_member_id:
             responsible = db.get(User, payload.responsible_member_id)
-            if not responsible:
+            if not responsible or responsible.status != UserStatus.ACTIVE:
                 raise HTTPException(status_code=422, detail="Responsible member not found")
         category_name = payload.category.strip() if payload.category else None
         if payload.category_id:

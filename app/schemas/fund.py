@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class FundSummaryOutput(BaseModel):
@@ -42,6 +42,22 @@ class CreateFundAdjustmentInput(BaseModel):
     description: str = Field(min_length=3, max_length=2000)
     entry_date: date | None = None
 
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 3:
+            raise ValueError("Description must contain at least 3 characters")
+        return normalized
+
 
 class ReverseFundEntryInput(BaseModel):
     reason: str = Field(min_length=3, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 3:
+            raise ValueError("Reversal reason must contain at least 3 characters")
+        return normalized

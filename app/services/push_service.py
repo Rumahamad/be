@@ -119,6 +119,8 @@ def send_push(
     icon: str = "/icons/bnc-192.png",
     tag: str = "",
     url: str = "/",
+    actions: list[dict[str, str]] | None = None,
+    action_urls: dict[str, str] | None = None,
     vapid_public_key: str,
     vapid_private_key_pem: str,
     vapid_subject: str,
@@ -135,8 +137,10 @@ def send_push(
         "body": body,
         "icon": icon,
         "tag": tag or title[:40],
-        "data": {"url": url},
+        "data": {"url": url, "action_urls": action_urls or {}},
     }
+    if actions:
+        payload_data["actions"] = actions[:2]
     payload_bytes = json.dumps(payload_data).encode()
 
     encrypted, _salt, _spub = encrypt_payload(payload_bytes, endpoint, p256dh, auth)

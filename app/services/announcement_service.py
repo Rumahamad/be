@@ -184,6 +184,7 @@ class NotificationService:
         reference_id: UUID | None = None,
         email_payload: dict | None = None,
         push_url: str = "/",
+        push_payload: dict | None = None,
     ) -> None:
         for user_id in set(user_ids):
             db.add(
@@ -223,6 +224,7 @@ class NotificationService:
                         "message": message,
                         "url": push_url,
                         "tag": event_type.lower(),
+                        **(push_payload or {}),
                     },
                     status="PENDING",
                 )

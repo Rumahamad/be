@@ -1,4 +1,5 @@
 from app.models.audit import AuditLog
+from app.models.backup import BackupOutbox, BackupRun, GoogleConnection, GoogleOAuthState
 from app.models.enums import *
 from app.models.expenses import Expense, ExpenseAttachment, ExpenseCategory
 from app.models.files import File
@@ -22,9 +23,12 @@ from app.models.payments import (
     PaymentRevision,
 )
 from app.models.settings import OrganizationSetting
+from app.models.verification import IncomingUpiCredit, PaymentProofExtraction, PaymentVerificationEvent
 
 __all__ = [
     "AuditLog",
+    "BackupOutbox",
+    "BackupRun",
     "Expense",
     "ExpenseAttachment",
     "ExpenseCategory",
@@ -32,6 +36,8 @@ __all__ = [
     "FundAccount",
     "FundEntry",
     "Group",
+    "GoogleConnection",
+    "GoogleOAuthState",
     "MemberMonthContribution",
     "OrganizationSetting",
     "Payment",
@@ -46,4 +52,7 @@ __all__ = [
     "User",
     "UserGroup",
     "UserPreference",
+    "IncomingUpiCredit",
+    "PaymentProofExtraction",
+    "PaymentVerificationEvent",
 ]

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config.settings import get_settings
 from app.models.enums import UserStatus
+from app.models.communications import NotificationOutbox
 from app.models.identity import DeletedUser, User, UserGroup, UserPreference
 from app.models.push_subscriptions import PushSubscription
 from app.repositories.members import MemberRepository
@@ -88,7 +89,7 @@ class MemberService:
 
     def set_status(self, db: Session, actor: User, member_id: UUID, status: UserStatus) -> User:
         user = db.get(User, member_id)
-        if not user:
+        if not user or user.status == UserStatus.DELETED:
             raise LookupError("Member not found")
         if user.id == actor.id and status != UserStatus.ACTIVE:
             raise MemberConflictError("You cannot disable your own account")
@@ -126,7 +127,7 @@ class MemberService:
         self, db: Session, actor: User, member_id: UUID, payload: UpdateMemberInput
     ) -> User:
         user = db.get(User, member_id)
-        if not user:
+        if not user or user.status == UserStatus.DELETED:
             raise LookupError("Member not found")
         changes = payload.model_dump(exclude_unset=True)
         before = {
@@ -176,7 +177,7 @@ class MemberService:
 
     def send_password_reset(self, db: Session, actor: User, member_id: UUID) -> None:
         user = db.get(User, member_id)
-        if not user:
+        if not user or user.status == UserStatus.DELETED:
             raise LookupError("Member not found")
         if user.auth_user_id is None:
             raise MemberConflictError("Approve this member before sending a password reset")
@@ -251,6 +252,14 @@ class MemberService:
             update(PushSubscription)
             .where(PushSubscription.user_id == user.id)
             .values(is_active=False)
+        )
+        db.execute(
+            update(NotificationOutbox)
+            .where(
+                NotificationOutbox.recipient_user_id == user.id,
+                NotificationOutbox.status.in_(("PENDING", "FAILED")),
+            )
+            .values(status="CANCELLED", processed_at=datetime.now(UTC))
         )
         user.first_name = "Deleted"
         user.last_name = None

@@ -179,3 +179,7 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# Recovery archives contain private member and financial data.
+BNC_BACKUP/
+backups/

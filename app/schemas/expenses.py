@@ -43,6 +43,13 @@ class UpdateExpenseCategoryInput(BaseModel):
             raise ValueError("Name cannot be blank")
         return normalized
 
+    @model_validator(mode="after")
+    def required_update_values(self) -> "UpdateExpenseCategoryInput":
+        for field in ("name", "sort_order", "is_active"):
+            if field in self.model_fields_set and getattr(self, field) is None:
+                raise ValueError(f"{field.replace('_', ' ').title()} is required")
+        return self
+
 
 class ExpenseCategoryOutput(BaseModel):
     id: UUID
@@ -76,6 +83,14 @@ class CreateExpenseInput(BaseModel):
 
 class ReverseExpenseInput(BaseModel):
     reason: str = Field(min_length=3, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 3:
+            raise ValueError("Reversal reason must contain at least 3 characters")
+        return normalized
 
 
 class ExpenseOutput(BaseModel):

@@ -47,6 +47,11 @@ class Payment(Base, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("users.id")
     )
     rejection_reason: Mapped[str | None] = mapped_column(Text)
+    verification_status: Mapped[str] = mapped_column(String(30), default="NOT_STARTED")
+    verification_method: Mapped[str | None] = mapped_column(String(20))
+    auto_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    auto_verified_reference: Mapped[str | None] = mapped_column(String(40))
+    verification_error_code: Mapped[str | None] = mapped_column(String(80))
 
 
 class PaymentAllocation(Base, TimestampMixin):

@@ -1,7 +1,7 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class CreateMemberInput(BaseModel):
@@ -18,6 +18,19 @@ class CreateMemberInput(BaseModel):
         if normalized.count("@") != 1 or "." not in normalized.rsplit("@", 1)[1]:
             raise ValueError("Enter a valid email address")
         return normalized
+
+    @field_validator("first_name")
+    @classmethod
+    def normalize_first_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("First name cannot be blank")
+        return normalized
+
+    @field_validator("last_name", "mobile")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
 
     @field_validator("role_code")
     @classmethod
@@ -39,6 +52,28 @@ class UpdateMemberInput(BaseModel):
     @classmethod
     def normalize_role_code(cls, value: str | None) -> str | None:
         return value.strip().upper().replace(" ", "_") if value else value
+
+    @field_validator("first_name")
+    @classmethod
+    def normalize_updated_first_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("First name cannot be blank")
+        return normalized
+
+    @field_validator("last_name", "mobile")
+    @classmethod
+    def normalize_updated_optional_text(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
+    @model_validator(mode="after")
+    def required_update_values(self) -> "UpdateMemberInput":
+        for field in ("first_name", "role_code"):
+            if field in self.model_fields_set and getattr(self, field) is None:
+                raise ValueError(f"{field.replace('_', ' ').title()} is required")
+        return self
 
 
 class MemberOutput(BaseModel):

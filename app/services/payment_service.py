@@ -28,6 +28,8 @@ from app.models.payments import (
     PaymentRevision,
 )
 from app.models.reversals import PaymentReversal
+from app.models.verification import PaymentVerificationEvent, PaymentProofExtraction
+from app.services.payment_utr_service import claim_reference
 from app.repositories.payments import PaymentRepository
 from app.schemas.payments import (
     ContributionAvailabilityInput,
@@ -61,6 +63,7 @@ class PaymentService:
             current_revision=1,
             user_note=payload.note,
             submitted_at=datetime.now(UTC),
+            verification_status="WAITING",
         )
         db.add(payment)
         db.flush()
@@ -73,9 +76,8 @@ class PaymentService:
                 actor_id,
                 comment="Admin-created payment",
                 require_proof=False,
+                verification_method="ADMIN_CREATED",
             )
-        else:
-            self._notify_reviewers(db, payment, "Payment awaiting verification")
         return payment
 
     def availability(
@@ -149,9 +151,57 @@ class PaymentService:
         payment.rejected_at = None
         payment.rejected_by = None
         payment.rejection_reason = None
+        payment.verification_status = "WAITING"
+        payment.verification_method = None
+        payment.auto_verified_at = None
+        payment.auto_verified_reference = None
+        payment.verification_error_code = None
         self._replace_allocations(db, payment, payload)
         self._record_revision(db, payment, payload)
-        self._notify_reviewers(db, payment, "Payment resubmitted for verification")
+        db.add(PaymentVerificationEvent(
+            payment_id=payment.id,
+            event_type="RESUBMITTED_FOR_VERIFICATION",
+            actor_type="USER",
+            actor_user_id=actor_id,
+            metadata_json={"revision": payment.current_revision},
+        ))
+        return payment
+
+    def mark_ready_for_review(self, db: Session, payment_id: UUID, actor_id: UUID) -> Payment:
+        payment = self.repository.get_for_update(db, payment_id)
+        if not payment:
+            raise HTTPException(status_code=404, detail="Payment not found")
+        if payment.status != PaymentStatus.PENDING_VERIFICATION:
+            raise HTTPException(status_code=409, detail="Payment is not awaiting verification")
+        if actor_id not in {payment.submitted_by, payment.created_by}:
+            raise HTTPException(status_code=403, detail="You cannot submit this payment for review")
+
+        proof_id = db.scalar(
+            select(PaymentFile.id)
+            .join(PaymentRevision, PaymentRevision.id == PaymentFile.payment_revision_id)
+            .where(
+                PaymentFile.payment_id == payment.id,
+                PaymentRevision.revision_no == payment.current_revision,
+            )
+            .limit(1)
+        )
+        if not proof_id:
+            raise HTTPException(status_code=409, detail="Upload at least one screenshot before submitting")
+
+        already_queued = db.scalar(
+            select(NotificationOutbox.id).where(
+                NotificationOutbox.event_type == "PAYMENT_PENDING_VERIFICATION",
+                NotificationOutbox.channel == "PUSH",
+                NotificationOutbox.payload["payment_id"].as_string() == str(payment.id),
+                NotificationOutbox.payload["revision"].as_integer() == payment.current_revision,
+            ).limit(1)
+        )
+        if not already_queued:
+            self._notify_reviewers(
+                db,
+                payment,
+                "Payment awaiting verification" if payment.current_revision == 1 else "Payment resubmitted for verification",
+            )
         return payment
 
     def approve(
@@ -162,6 +212,8 @@ class PaymentService:
         comment: str | None = None,
         *,
         require_proof: bool = True,
+        verification_method: str = "MANUAL",
+        incoming_credit_id: UUID | None = None,
     ) -> Payment:
         payment = self.repository.get_for_update(db, payment_id)
         if not payment or payment.status != PaymentStatus.PENDING_VERIFICATION:
@@ -183,10 +235,38 @@ class PaymentService:
                     detail="At least one screenshot is required before approval",
                 )
 
+        # Every approval path claims known UTRs permanently, including manual
+        # approval before email arrival. Reversal never releases those claims.
+        references = set(db.scalars(select(PaymentProofExtraction.selected_upi_reference).where(
+            PaymentProofExtraction.payment_id == payment.id,
+            PaymentProofExtraction.payment_revision == payment.current_revision,
+            PaymentProofExtraction.selected_upi_reference.is_not(None),
+        )).all())
+        if payment.auto_verified_reference:
+            references.add(payment.auto_verified_reference)
+        for reference in sorted(references):
+            claim_reference(db, reference, payment.id)
         now = datetime.now(UTC)
         payment.status = PaymentStatus.APPROVED
         payment.approved_at = now
         payment.approved_by = admin_id
+        payment.verification_method = verification_method
+        payment.verification_status = (
+            "AUTO_VERIFIED" if verification_method == "HDFC_EMAIL" else "MANUAL_VERIFIED"
+        )
+        db.add(PaymentVerificationEvent(
+            payment_id=payment.id,
+            event_type=("AUTO_VERIFIED" if verification_method == "HDFC_EMAIL" else "MANUAL_APPROVED"),
+            actor_type="SYSTEM" if verification_method == "HDFC_EMAIL" else "USER",
+            actor_user_id=admin_id,
+            incoming_credit_id=incoming_credit_id,
+            upi_reference_masked=(
+                f"********{payment.auto_verified_reference[-4:]}"
+                if payment.auto_verified_reference else None
+            ),
+            metadata_json={"revision": payment.current_revision, "method": verification_method,
+                           "approved_at": now.isoformat(), "references": sorted(references)},
+        ))
         contributions = db.scalars(
             select(MemberMonthContribution)
             .where(MemberMonthContribution.payment_id == payment_id)
@@ -251,6 +331,13 @@ class PaymentService:
         payment.rejected_at = now
         payment.rejected_by = admin_id
         payment.rejection_reason = reason
+        db.add(PaymentVerificationEvent(
+            payment_id=payment.id,
+            event_type="MANUAL_REJECTED",
+            actor_type="USER",
+            actor_user_id=admin_id,
+            metadata_json={"revision": payment.current_revision},
+        ))
         contributions = db.scalars(
             select(MemberMonthContribution)
             .where(MemberMonthContribution.payment_id == payment_id)
@@ -360,6 +447,7 @@ class PaymentService:
 
     def _notify_reviewers(self, db: Session, payment: Payment, title: str) -> None:
         reviewer_ids = self.notifications.users_with_permission(db, PAYMENT_APPROVE)
+        review_url = f"/admin?view=payments&payment={payment.id}&review=1"
         self.notifications.create_for_users(
             db,
             user_ids=reviewer_ids,
@@ -368,6 +456,20 @@ class PaymentService:
             message=f"{payment.payment_no} for ₹{payment.total_amount} needs review.",
             reference_type="payment",
             reference_id=payment.id,
+            email_payload={"payment_id": str(payment.id), "revision": payment.current_revision},
+            push_url=review_url,
+            push_payload={
+                "payment_id": str(payment.id),
+                "revision": payment.current_revision,
+                "actions": [
+                    {"action": "review", "title": "Review"},
+                    {"action": "reject", "title": "Reject"},
+                ],
+                "action_urls": {
+                    "review": review_url,
+                    "reject": f"{review_url}&reject=1",
+                },
+            },
         )
 
     def _replace_allocations(

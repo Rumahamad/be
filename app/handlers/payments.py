@@ -91,6 +91,12 @@ class PaymentHandler:
             approved_at=payment.approved_at,
             rejected_at=payment.rejected_at,
             rejection_reason=payment.rejection_reason,
+            verification_status=payment.verification_status,
+            verification_method=payment.verification_method,
+            verification_reference_masked=(
+                f"********{payment.auto_verified_reference[-4:]}"
+                if payment.auto_verified_reference else None
+            ),
             submitted_by_id=submitter.id,
             submitted_by_name=submitter.display_name,
             submitted_by_email=submitter.email,
@@ -196,12 +202,33 @@ class PaymentHandler:
         )
         return updated
 
-    def approve(self, db: Session, user: User, payment_id: UUID) -> Payment:
-        payment = self.payments.approve(db, payment_id, user.id)
+    def approve(self, db: Session, user: User, payment_id: UUID, *, verified: bool = False) -> Payment:
+        if verified:
+            from app.services.payment_reconciliation_service import PaymentReconciliationService
+            result = PaymentReconciliationService().reconcile_payment(
+                db, payment_id, user.id, approve_verified=True,
+            )
+            if result != 'VERIFIED_APPROVED':
+                raise HTTPException(409, f'Verified approval unavailable: {result}. Refresh and review the payment.')
+            payment = db.get(Payment, payment_id)
+        else:
+            payment = self.payments.approve(db, payment_id, user.id)
         self.audit.record(
             db,
             actor_user_id=user.id,
             action="payment.approved",
+            entity_type="payment",
+            entity_id=payment.id,
+            after_data={"revision": payment.current_revision},
+        )
+        return payment
+
+    def mark_ready_for_review(self, db: Session, user: User, payment_id: UUID) -> Payment:
+        payment = self.payments.mark_ready_for_review(db, payment_id, user.id)
+        self.audit.record(
+            db,
+            actor_user_id=user.id,
+            action="payment.ready_for_review",
             entity_type="payment",
             entity_id=payment.id,
             after_data={"revision": payment.current_revision},

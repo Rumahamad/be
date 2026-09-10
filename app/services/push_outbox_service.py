@@ -65,6 +65,8 @@ class PushOutboxService:
             body = str(item.payload.get("message", ""))[:1000]
             url = str(item.payload.get("url", "/"))[:1000]
             tag = str(item.payload.get("tag", item.event_type.lower()))[:120]
+            actions = item.payload.get("actions")
+            action_urls = item.payload.get("action_urls")
 
             sent_count = 0
             errors: list[str] = []
@@ -78,6 +80,8 @@ class PushOutboxService:
                         body=body,
                         url=url,
                         tag=tag,
+                        actions=actions if isinstance(actions, list) else None,
+                        action_urls=action_urls if isinstance(action_urls, dict) else None,
                         vapid_public_key=settings.vapid_public_key,
                         vapid_private_key_pem=settings.vapid_private_key_pem,
                         vapid_subject=settings.vapid_subject,

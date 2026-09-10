@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 
 class CreateGroupInput(BaseModel):
@@ -10,10 +10,12 @@ class CreateGroupInput(BaseModel):
 
     @field_validator("name", "code", "description")
     @classmethod
-    def strip_text(cls, value: str | None) -> str | None:
+    def strip_text(cls, value: str | None, info: ValidationInfo) -> str | None:
         if value is None:
             return None
         cleaned = value.strip()
+        if not cleaned and info.field_name == "name":
+            raise ValueError("Group name cannot be blank")
         return cleaned or None
 
     @field_validator("code")
@@ -27,6 +29,19 @@ class UpdateGroupInput(BaseModel):
     code: str | None = Field(default=None, min_length=2, max_length=40)
     description: str | None = Field(default=None, max_length=2000)
     is_active: bool | None = None
+
+    @field_validator("name", "code", "description")
+    @classmethod
+    def normalize_group_text(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
+    @model_validator(mode="after")
+    def required_group_values(self) -> "UpdateGroupInput":
+        if "name" in self.model_fields_set and self.name is None:
+            raise ValueError("Group name cannot be blank")
+        if "is_active" in self.model_fields_set and self.is_active is None:
+            raise ValueError("Group status is required")
+        return self
 
 
 class SetGroupMembersInput(BaseModel):
@@ -77,11 +92,29 @@ class CreateRoleInput(BaseModel):
 
     @field_validator("name", "description")
     @classmethod
-    def strip_role_text(cls, value: str | None) -> str | None:
-        return value.strip() if value else value
+    def strip_role_text(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized and info.field_name == "name":
+            raise ValueError("Role name cannot be blank")
+        return normalized or None
 
 
 class UpdateRoleInput(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=100)
     description: str | None = Field(default=None, max_length=2000)
     is_active: bool | None = None
+
+    @field_validator("name", "description")
+    @classmethod
+    def normalize_role_update_text(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
+    @model_validator(mode="after")
+    def required_role_values(self) -> "UpdateRoleInput":
+        if "name" in self.model_fields_set and self.name is None:
+            raise ValueError("Role name cannot be blank")
+        if "is_active" in self.model_fields_set and self.is_active is None:
+            raise ValueError("Role status is required")
+        return self

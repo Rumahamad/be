@@ -32,6 +32,8 @@ class PaymentOutput(BaseModel):
     total_amount: Decimal
     current_revision: int
     submitted_at: datetime | None
+    verification_status: str
+    verification_method: str | None
 
 
 class PaymentQueueItem(BaseModel):
@@ -45,6 +47,8 @@ class PaymentQueueItem(BaseModel):
     submitted_by_name: str
     submitted_by_email: str
     rejection_reason: str | None
+    verification_status: str
+    verification_method: str | None
 
 
 class PaymentListOutput(BaseModel):
@@ -158,6 +162,9 @@ class PaymentDetailOutput(BaseModel):
     approved_at: datetime | None
     rejected_at: datetime | None
     rejection_reason: str | None
+    verification_status: str
+    verification_method: str | None
+    verification_reference_masked: str | None
     submitted_by_id: UUID
     submitted_by_name: str
     submitted_by_email: str

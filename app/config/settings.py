@@ -39,6 +39,27 @@ class Settings(BaseSettings):
     email_app_name: str = "BNC"
     notification_max_attempts: int = 5
 
+    # Owner-only Google integration. Secrets and refresh tokens never reach the UI.
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_redirect_uri: str = ""
+    google_token_encryption_key: str = ""
+    google_owner_email: str = ""
+
+    # HDFC Gmail verification remains shadow-only until real message headers are verified.
+    payment_auto_verify_enabled: bool = False
+    payment_auto_verify_shadow_mode: bool = True
+    gmail_oauth_redirect_uri: str = ""
+    gmail_verification_account_email: str = ""
+    gmail_owner_email: str = ""  # legacy name retained for existing deployments
+    gmail_hdfc_search_query: str = ""
+    gmail_poll_interval_seconds: int = 60
+    hdfc_credit_email_from: str = ""
+    hdfc_forwarder_email: str = ""
+    hdfc_expected_account_last4: str = ""
+    tesseract_cmd: str = ""
+    tesseract_language: str = "eng"
+
     # Web Push / VAPID
     vapid_public_key: str = ""
     vapid_private_key_pem: str = ""
@@ -63,6 +84,31 @@ class Settings(BaseSettings):
     @property
     def email_enabled(self) -> bool:
         return self.email_provider != "disabled"
+
+    @property
+    def google_oauth_configured(self) -> bool:
+        return bool(
+            self.google_oauth_client_id
+            and self.google_oauth_client_secret
+            and self.google_oauth_redirect_uri
+            and self.google_token_encryption_key
+        )
+
+    @property
+    def gmail_verification_configured(self) -> bool:
+        return bool(
+            self.google_oauth_client_id
+            and self.google_oauth_client_secret
+            and self.gmail_oauth_redirect_uri
+            and self.google_token_encryption_key
+            and self.gmail_hdfc_search_query
+            and self.hdfc_credit_email_from
+            and len(self.hdfc_expected_account_last4) == 4
+        )
+
+    @property
+    def payment_ocr_configured(self) -> bool:
+        return bool(self.tesseract_language)
 
 
 @lru_cache

@@ -101,7 +101,7 @@ class MemberHandler:
         payload: UpdatePreferencesInput,
     ) -> PreferencesOutput:
         member = db.get(User, member_id)
-        if not member:
+        if not member or member.status == UserStatus.DELETED:
             raise HTTPException(status_code=404, detail="Member not found")
         return self.preferences.update_for_user(
             db,

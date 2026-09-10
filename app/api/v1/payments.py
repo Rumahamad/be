@@ -20,6 +20,7 @@ from app.constants.permissions import PAYMENT_APPROVE, PAYMENT_REJECT, PAYMENT_R
 from app.db.session import get_db
 from app.handlers.payments import PaymentHandler
 from app.jobs.push_notifications import process_push_outbox
+from app.jobs.payment_verification import process_payment_proof
 from app.models.enums import PaymentStatus
 from app.models.identity import User
 from app.schemas.payments import (
@@ -51,6 +52,8 @@ def output(payment) -> PaymentOutput:
         total_amount=payment.total_amount,
         current_revision=payment.current_revision,
         submitted_at=payment.submitted_at,
+        verification_status=payment.verification_status,
+        verification_method=payment.verification_method,
     )
 
 
@@ -107,6 +110,8 @@ def list_payments(
                 submitted_by_name=submitter.display_name,
                 submitted_by_email=submitter.email,
                 rejection_reason=payment.rejection_reason,
+                verification_status=payment.verification_status,
+                verification_method=payment.verification_method,
             )
             for payment, submitter in rows
         ],
@@ -174,11 +179,26 @@ def resubmit_payment(
 def approve_payment(
     payment_id: UUID,
     background_tasks: BackgroundTasks,
+    verified: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(PAYMENT_APPROVE)),
 ) -> PaymentOutput:
-    payment = handler.approve(db, user, payment_id)
+    payment = handler.approve(db, user, payment_id, verified=verified)
     commit(db)
+    background_tasks.add_task(process_push_outbox)
+    return output(payment)
+
+
+@router.post("/{payment_id}/ready-for-review", response_model=PaymentOutput)
+def mark_payment_ready_for_review(
+    payment_id: UUID,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> PaymentOutput:
+    payment = handler.mark_ready_for_review(db, user, payment_id)
+    commit(db)
+    background_tasks.add_task(process_payment_proof, payment_id)
     background_tasks.add_task(process_push_outbox)
     return output(payment)
 
@@ -212,6 +232,7 @@ def reverse_payment(
 @router.post("/{payment_id}/files", response_model=PaymentFileOutput, status_code=status.HTTP_201_CREATED)
 async def upload_payment_file(
     payment_id: UUID,
+    background_tasks: BackgroundTasks,
     request: Request,
     filename: str = Query(default="screenshot", min_length=1, max_length=255),
     content_type: str = Header(default="application/octet-stream"),
@@ -219,7 +240,7 @@ async def upload_payment_file(
     user: User = Depends(current_user),
 ) -> PaymentFileOutput:
     content = await request.body()
-    return file_service.upload(
+    uploaded = file_service.upload(
         db,
         user,
         payment_id,
@@ -227,6 +248,7 @@ async def upload_payment_file(
         mime_type=content_type,
         content=content,
     )
+    return uploaded
 
 
 @router.get("/{payment_id}/files", response_model=list[PaymentFileOutput])

@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.identity import User, UserPreference
+from app.models.enums import UserStatus
 from app.models.settings import OrganizationSetting
 from app.schemas.preferences import PreferencesOutput, UpdatePreferencesInput
 from app.services.audit_service import AuditService
@@ -100,7 +101,7 @@ class PreferenceService:
             if payload.theme is not None:
                 setting.default_theme = payload.theme
 
-        users = db.scalars(select(User)).all()
+        users = db.scalars(select(User).where(User.status != UserStatus.DELETED)).all()
         stored = {
             item.user_id: item
             for item in db.scalars(select(UserPreference)).all()

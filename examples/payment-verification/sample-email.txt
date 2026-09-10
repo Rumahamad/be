@@ -1,0 +1,9 @@
+Dear Customer,
+
+We're writing to inform you that Rs.500.00 has been successfully credited to
+your HDFC Bank account ending in 1234.
+
+Transaction Details:
+a. Date: 08/09/2026 10:30
+b. Sender: Example Payer (VPA: example@upi)
+c. UPI Reference No.: 123456789012

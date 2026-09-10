@@ -1,5 +1,6 @@
 from app.models import (  # noqa: F401
     audit,
+    backup,
     communications,
     expenses,
     files,
@@ -8,4 +9,5 @@ from app.models import (  # noqa: F401
     payments,
     push_subscriptions,
     settings,
+    verification,
 )
