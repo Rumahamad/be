@@ -26,6 +26,9 @@ build-backend = "setuptools.build_meta"
 include = ["app*"]
 exclude = ["alembic*", "tests*"]
 
+[tool.vercel]
+entrypoint = "app.main:app"
+
 [project.optional-dependencies]
 dev = ["pytest>=8.3", "ruff>=0.8"]
 

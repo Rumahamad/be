@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     paytm_expected_merchant_name: str = ""
     tesseract_cmd: str = ""
     tesseract_language: str = "eng"
+    payment_ocr_enabled: bool = True
 
     # Web Push / VAPID
     vapid_public_key: str = ""
@@ -137,7 +138,7 @@ class Settings(BaseSettings):
 
     @property
     def payment_ocr_configured(self) -> bool:
-        return bool(self.tesseract_language)
+        return self.payment_ocr_enabled and bool(self.tesseract_language)
 
 
 @lru_cache

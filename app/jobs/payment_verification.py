@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 
+from app.config.settings import get_settings
 from app.db.session import SessionLocal
 from app.models.backup import GoogleConnection
 from app.services.gmail_verification_oauth_service import PURPOSE
@@ -12,6 +13,8 @@ from app.services.payment_reconciliation_service import PaymentReconciliationSer
 
 
 def process_payment_proof(payment_id: UUID, *, force: bool = False) -> int:
+    if not get_settings().payment_ocr_configured:
+        return 0
     with SessionLocal() as db:
         processed = PaymentProofOcrService().process_payment(db, payment_id, force=force)
         # Retain extraction evidence even if reconciliation/provider state fails.
@@ -27,6 +30,8 @@ def process_payment_proof(payment_id: UUID, *, force: bool = False) -> int:
 
 
 def process_pending_payment_proofs(limit: int = 20) -> int:
+    if not get_settings().payment_ocr_configured:
+        return 0
     with SessionLocal() as db:
         payment_ids = []
         # Let the service perform the eligibility query and OCR in one session.
