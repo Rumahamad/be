@@ -13,7 +13,7 @@ from app.models.push_subscriptions import PushSubscription
 from app.repositories.members import MemberRepository
 from app.schemas.members import CreateMemberInput, UpdateMemberInput
 from app.services.audit_service import AuditService
-from app.services.supabase_admin_service import SupabaseAdminService
+from app.services.auth_admin_service import AuthAdminService
 
 
 class MemberConflictError(Exception):
@@ -23,7 +23,7 @@ class MemberConflictError(Exception):
 class MemberService:
     def __init__(self) -> None:
         self.members = MemberRepository()
-        self.auth_admin = SupabaseAdminService()
+        self.auth_admin = AuthAdminService()
         self.audit = AuditService()
 
     def create(self, db: Session, actor: User, payload: CreateMemberInput) -> User:

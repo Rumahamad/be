@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.identity import Role, User
-from app.services.supabase_admin_service import SupabaseAdminService
+from app.services.auth_admin_service import AuthAdminService
 
 
 class AdminBootstrapError(Exception):
@@ -22,8 +22,8 @@ class AdminBootstrapInput:
 
 
 class AdminBootstrapService:
-    def __init__(self, auth_admin: SupabaseAdminService | None = None) -> None:
-        self.auth_admin = auth_admin or SupabaseAdminService()
+    def __init__(self, auth_admin=None) -> None:
+        self.auth_admin = auth_admin or AuthAdminService()
 
     def create_first_admin(self, db: Session, data: AdminBootstrapInput) -> User:
         existing_user_count = db.scalar(select(func.count()).select_from(User)) or 0

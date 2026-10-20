@@ -11,15 +11,15 @@ from app.config.settings import get_settings
 from app.models.enums import FileStatus, UserStatus
 from app.models.files import File as FileRecord
 from app.models.identity import User
-from app.services.storage_service import StorageError, SupabaseStorageService
+from app.services.storage_service import StorageError, StorageService
 
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_PROFILE_BYTES = 2 * 1024 * 1024
 
 
 class ProfilePictureService:
-    def __init__(self, storage: SupabaseStorageService | None = None) -> None:
-        self.storage = storage or SupabaseStorageService()
+    def __init__(self, storage=None) -> None:
+        self.storage = storage or StorageService()
 
     def upload(
         self,
@@ -38,7 +38,7 @@ class ProfilePictureService:
         suffix = PurePosixPath(filename).suffix.lower()
         if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
             suffix = mimetypes.guess_extension(mime_type) or ".bin"
-        bucket = get_settings().supabase_storage_bucket
+        bucket = get_settings().storage_bucket
         object_key = f"profiles/{member.id}/{uuid4()}{suffix}"
         try:
             self.storage.upload(bucket, object_key, content, mime_type)
@@ -47,6 +47,7 @@ class ProfilePictureService:
 
         previous = db.get(FileRecord, member.profile_picture_file_id) if member.profile_picture_file_id else None
         record = FileRecord(
+            storage_provider=get_settings().storage_provider,
             bucket_name=bucket,
             object_key=object_key,
             original_name=(filename or "profile-picture")[:255],

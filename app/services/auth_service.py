@@ -18,7 +18,7 @@ class AuthSession:
     password_setup_required: bool = False
 
 
-class AuthService:
+class SupabaseAuthService:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
 
@@ -159,3 +159,14 @@ class AuthService:
             if message:
                 return str(message)
         return fallback
+
+
+class AuthService:
+    """Select a provider explicitly; retained Supabase support is for migration rollback."""
+
+    def __new__(cls, settings: Settings | None = None):
+        settings = settings or get_settings()
+        if getattr(settings, "auth_provider", "supabase") == "supabase":
+            return SupabaseAuthService(settings)
+        from app.services.local_auth_service import LocalAuthService
+        return LocalAuthService(settings)

@@ -1,4 +1,5 @@
-from urllib.parse import urlsplit
+import hmac
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
@@ -10,6 +11,7 @@ from app.api.dependencies import bearer, current_user
 from app.config.settings import get_settings
 from app.db.session import get_db
 from app.handlers.auth import AuthHandler
+from app.services.auth_service import AuthProviderError
 from app.models.identity import Permission, Role, RolePermission, User
 from app.schemas.auth import (
     AuthTokenOutput,
@@ -131,7 +133,37 @@ def google(return_to: str | None = None):
     origin = f"{urlsplit(target).scheme}://{urlsplit(target).netloc}"
     if origin not in settings.cors_origins:
         raise HTTPException(status_code=400, detail="Invalid authentication return URL")
-    return RedirectResponse(handler.auth.google_authorize_url(target))
+    if settings.auth_provider == "supabase":
+        return RedirectResponse(handler.auth.google_authorize_url(target))
+    try:
+        url, state = handler.auth.begin_google(target)
+    except AuthProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    response = RedirectResponse(url)
+    response.set_cookie("bnc_oauth_state", state, max_age=600, httponly=True,
+        secure=settings.auth_cookie_secure, samesite="lax", path="/api/v1/auth/google")
+    return response
+
+
+@router.get("/google/callback")
+def google_callback(request: Request, state: str = "", code: str = "", error: str = ""):
+    settings = get_settings()
+    cookie = request.cookies.get("bnc_oauth_state", "")
+    if settings.auth_provider != "local" or not state or not cookie or not hmac.compare_digest(state, cookie):
+        raise HTTPException(status_code=400, detail="Invalid Google sign-in state")
+    try:
+        if error or not code:
+            raise AuthProviderError("Google sign-in was cancelled")
+        session, target = handler.auth.finish_google(code, state)
+        response = RedirectResponse(target, status_code=303)
+        set_refresh_cookie(response, session.refresh_token)
+    except AuthProviderError as exc:
+        response = RedirectResponse(settings.frontend_url.rstrip("/") + "/?" +
+            urlencode({"error_description": str(exc)}), status_code=303)
+    response.delete_cookie("bnc_oauth_state", path="/api/v1/auth/google")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 @router.post("/logout", status_code=204)

@@ -19,7 +19,7 @@ from app.models.identity import User
 from app.models.settings import OrganizationSetting
 from app.repositories.expenses import ExpenseRepository
 from app.schemas.expenses import ExpenseAttachmentOutput
-from app.services.storage_service import StorageError, SupabaseStorageService
+from app.services.storage_service import StorageError, StorageService
 
 ALLOWED_EXPENSE_FILE_TYPES = {
     "image/jpeg": ".jpg",
@@ -33,10 +33,10 @@ class ExpenseAttachmentService:
     def __init__(
         self,
         repository: ExpenseRepository | None = None,
-        storage: SupabaseStorageService | None = None,
+        storage=None,
     ) -> None:
         self.repository = repository or ExpenseRepository()
-        self.storage = storage or SupabaseStorageService()
+        self.storage = storage or StorageService()
 
     def upload(
         self,
@@ -70,13 +70,14 @@ class ExpenseAttachmentService:
         normalized_name = (filename or "attachment").replace("\\", "/")
         safe_stem = re.sub(r"[\x00-\x1f\x7f]", "_", PurePosixPath(normalized_name).name)[:255]
         object_key = f"expenses/{expense.id}/{uuid4()}{suffix}"
-        bucket = get_settings().supabase_storage_bucket
+        bucket = get_settings().storage_bucket
         try:
             self.storage.upload(bucket, object_key, content, normalized_type)
         except StorageError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         file_record = FileRecord(
+            storage_provider=get_settings().storage_provider,
             bucket_name=bucket,
             object_key=object_key,
             original_name=safe_stem or f"attachment{suffix}",

@@ -18,8 +18,10 @@ from app.api.v1.push import router as push_router
 from app.api.v1.reports import router as reports_router
 from app.api.v1.settings import router as settings_router
 from app.config.settings import get_settings
+from app.config.auth_middleware import protect_auth
 
 app = FastAPI(title="BNC API", version="0.1.0")
+app.middleware("http")(protect_auth)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().cors_origins,

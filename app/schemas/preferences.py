@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-LanguageCode = Literal["en", "bn", "ur"]
+LanguageCode = Literal["en", "bn", "ur", "pr"]
 ThemeCode = Literal["bnc-green", "night"]
 
 

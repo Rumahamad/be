@@ -14,6 +14,14 @@ def jwks_client() -> PyJWKClient:
 
 def verify_access_token(token: str) -> dict:
     settings = get_settings()
+    if settings.auth_provider == "local":
+        from app.services.auth_service import AuthProviderError
+        from app.services.local_auth_service import LocalAuthService
+        try:
+            return LocalAuthService(settings).validate(token)
+        except AuthProviderError as exc:
+            raise HTTPException(status_code=401, detail=str(exc),
+                                headers={"WWW-Authenticate": "Bearer"}) from exc
     try:
         signing_key = jwks_client().get_signing_key_from_jwt(token)
         return jwt.decode(

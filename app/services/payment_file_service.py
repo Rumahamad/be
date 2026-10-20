@@ -17,15 +17,15 @@ from app.models.files import File as FileRecord
 from app.models.identity import User
 from app.models.payments import Payment, PaymentFile, PaymentRevision
 from app.schemas.payments import PaymentFileOutput
-from app.services.storage_service import StorageError, SupabaseStorageService
+from app.services.storage_service import StorageError, StorageService
 
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_FILES_PER_REVISION = 5
 
 
 class PaymentFileService:
-    def __init__(self, storage: SupabaseStorageService | None = None) -> None:
-        self.storage = storage or SupabaseStorageService()
+    def __init__(self, storage=None) -> None:
+        self.storage = storage or StorageService()
 
     def upload(
         self,
@@ -79,13 +79,14 @@ class PaymentFileService:
         if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
             suffix = mimetypes.guess_extension(mime_type) or ".bin"
         object_key = f"payments/{payment.id}/revisions/{payment.current_revision}/{uuid4()}{suffix}"
-        bucket = get_settings().supabase_storage_bucket
+        bucket = get_settings().storage_bucket
         try:
             self.storage.upload(bucket, object_key, content, mime_type)
         except StorageError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         file_record = FileRecord(
+            storage_provider=get_settings().storage_provider,
             bucket_name=bucket,
             object_key=object_key,
             original_name=(filename or "screenshot")[:255],

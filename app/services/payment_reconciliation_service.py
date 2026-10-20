@@ -128,6 +128,8 @@ class PaymentReconciliationService:
             payment.verification_error_code = None
             return "WAITING_FOR_EMAIL"
         if (
+            credit.source != "HDFC_GMAIL"
+            or
             credit.parse_status != "READY"
             or not credit.sender_verified
             or not credit.recipient_account_matches

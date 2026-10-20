@@ -9,7 +9,18 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     database_url: str
-    supabase_url: str
+    auth_provider: Literal["local", "supabase"] = "local"
+    storage_provider: Literal["LOCAL", "SUPABASE"] = "LOCAL"
+    local_storage_root: str = ".local/storage"
+    storage_bucket: str = "bnc-payment-files"
+    local_auth_secret: str = ""
+    local_auth_issuer: str = "bnc-local"
+    local_auth_access_seconds: int = 900
+    local_auth_link_seconds: int = 3600
+    backup_encryption_key: str = ""
+    postgres_bin: str = ".local/postgresql/pgsql/bin"
+    google_login_redirect_uri: str = "http://127.0.0.1:5173/api/v1/auth/google/callback"
+    supabase_url: str = ""
     supabase_publishable_key: str = ""
     supabase_secret_key: str = ""
     supabase_anon_key: str = ""
@@ -19,7 +30,7 @@ class Settings(BaseSettings):
     supabase_jwt_issuer: str = ""
     supabase_jwt_audience: str = "authenticated"
     auth_bypass_enabled: bool = False
-    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173", "https://bnc.pp.ua", "https://www.bnc.pp.ua"]
+    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173", "https://bnc.pp.ua", "https://www.bnc.pp.ua", "https://bamarrahnaujawancommittee.pp.ua"]
     frontend_url: str = "https://bnc.pp.ua"
     auth_cookie_secure: bool = False
     auth_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
@@ -46,7 +57,7 @@ class Settings(BaseSettings):
     google_token_encryption_key: str = ""
     google_owner_email: str = ""
 
-    # HDFC Gmail verification remains shadow-only until real message headers are verified.
+    # Gmail payment sources remain shadow-only until real message headers are verified.
     payment_auto_verify_enabled: bool = False
     payment_auto_verify_shadow_mode: bool = True
     gmail_oauth_redirect_uri: str = ""
@@ -57,6 +68,10 @@ class Settings(BaseSettings):
     hdfc_credit_email_from: str = ""
     hdfc_forwarder_email: str = ""
     hdfc_expected_account_last4: str = ""
+    gmail_paytm_search_query: str = ""
+    paytm_merchant_email_from: str = ""
+    paytm_forwarder_email: str = ""
+    paytm_expected_merchant_name: str = ""
     tesseract_cmd: str = ""
     tesseract_language: str = "eng"
 
@@ -101,9 +116,23 @@ class Settings(BaseSettings):
             and self.google_oauth_client_secret
             and self.gmail_oauth_redirect_uri
             and self.google_token_encryption_key
-            and self.gmail_hdfc_search_query
+            and (self.hdfc_gmail_source_configured or self.paytm_merchant_source_configured)
+        )
+
+    @property
+    def hdfc_gmail_source_configured(self) -> bool:
+        return bool(
+            self.gmail_hdfc_search_query
             and self.hdfc_credit_email_from
             and len(self.hdfc_expected_account_last4) == 4
+        )
+
+    @property
+    def paytm_merchant_source_configured(self) -> bool:
+        return bool(
+            self.gmail_paytm_search_query
+            and self.paytm_merchant_email_from
+            and self.paytm_expected_merchant_name
         )
 
     @property

@@ -14,13 +14,13 @@ from app.models.enums import FileStatus, PaymentStatus
 from app.models.files import File as FileRecord
 from app.models.payments import Payment, PaymentFile, PaymentRevision
 from app.models.verification import PaymentProofExtraction, PaymentVerificationEvent
-from app.services.storage_service import StorageError, SupabaseStorageService
+from app.services.storage_service import StorageError, StorageService
 from app.services.payment_verification_readiness import ready_payment
 
 
 class PaymentProofOcrService:
     def __init__(self) -> None:
-        self.storage = SupabaseStorageService()
+        self.storage = StorageService()
         self.ocr = TesseractScreenshotOcr()
 
     def process_payment(self, db: Session, payment_id: UUID, *, force: bool = False) -> int:

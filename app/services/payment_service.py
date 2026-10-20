@@ -51,8 +51,6 @@ class PaymentService:
         db: Session,
         actor_id: UUID,
         payload: CreatePaymentInput,
-        *,
-        auto_approve: bool = False,
     ) -> Payment:
         payment = Payment(
             payment_no=payment_no(),
@@ -69,15 +67,6 @@ class PaymentService:
         db.flush()
         self._replace_allocations(db, payment, payload)
         self._record_revision(db, payment, payload)
-        if auto_approve:
-            self.approve(
-                db,
-                payment.id,
-                actor_id,
-                comment="Admin-created payment",
-                require_proof=False,
-                verification_method="ADMIN_CREATED",
-            )
         return payment
 
     def availability(

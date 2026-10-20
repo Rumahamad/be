@@ -45,6 +45,8 @@ class AuthHandler:
         return replace(session, password_setup_required=user.password_setup_required)
 
     def accept_oauth_session(self, db: Session, payload: OAuthSessionInput) -> AuthSession:
+        if get_settings().auth_provider == "local":
+            raise HTTPException(status_code=400, detail="Use the Google sign-in callback")
         user = access_token_user(payload.access_token, db)
         return AuthSession(
             access_token=payload.access_token,
@@ -70,7 +72,10 @@ class AuthHandler:
         payload: ChangePasswordInput,
     ) -> None:
         try:
-            self.auth.login(user.email, payload.current_password)
+            if get_settings().auth_provider == "local":
+                self.auth.verify_password(user.email, payload.current_password)
+            else:
+                self.auth.login(user.email, payload.current_password)
             self.auth.update_password(access_token, payload.new_password)
         except AuthProviderError as exc:
             status_code = 503 if str(exc) == "Authentication service is unavailable" else 400
@@ -99,6 +104,9 @@ class AuthHandler:
 
     def recover_password(self, db: Session, payload: RecoverPasswordInput) -> None:
         try:
+            if get_settings().auth_provider == "local":
+                self.auth.recover_password(payload.token_hash, payload.password)
+                return
             session = self.auth.verify_recovery_token(payload.token_hash)
             user = access_token_user(session.access_token, db)
             self.auth.update_password(session.access_token, payload.password)

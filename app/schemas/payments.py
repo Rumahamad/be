@@ -142,6 +142,12 @@ class ReceiptOutput(BaseModel):
     generated_at: datetime | None
 
 
+class ReceiptEmailOutput(BaseModel):
+    status: Literal["SENT"]
+    receipt_no: str
+    recipient: str
+
+
 class PaymentReversalOutput(BaseModel):
     id: UUID
     reason: str

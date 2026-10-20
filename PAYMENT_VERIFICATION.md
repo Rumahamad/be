@@ -1,4 +1,4 @@
-# HDFC Gmail payment verification
+# Gmail payment verification
 
 Shadow and automatic modes share one authentication and matching engine.
 Shadow leaves exact matches pending with **Approve verified payment**; screenshot
@@ -30,6 +30,10 @@ GMAIL_VERIFICATION_ACCOUNT_EMAIL=
 TESSERACT_CMD=
 TESSERACT_LANGUAGE=eng
 HDFC_EXPECTED_ACCOUNT_LAST4=
+GMAIL_PAYTM_SEARCH_QUERY=
+PAYTM_MERCHANT_EMAIL_FROM=
+PAYTM_FORWARDER_EMAIL=
+PAYTM_EXPECTED_MERCHANT_NAME=
 PAYMENT_AUTO_VERIFY_ENABLED=false
 PAYMENT_AUTO_VERIFY_SHADOW_MODE=true
 ```
@@ -43,6 +47,27 @@ When a private Gmail account automatically forwards only HDFC alerts to the BNC
 mailbox, query the preserved bank `From` address. Keep `HDFC_FORWARDER_EMAIL`
 as the exact trusted forwarding source; the backend never connects to that
 private account. Connect only the BNC Gmail account.
+
+## Paytm for Business merchant notifications
+
+The supplied Paytm format is accepted as a second, independently authenticated
+Gmail source. It verifies the exact `From` address, Gmail SPF/DKIM/DMARC (or a
+verified Gmail forwarding chain), Payment Received amount, merchant name,
+transaction time, and Paytm Order ID. Configure an exact sender and a dedicated
+label where practical:
+
+```env
+GMAIL_PAYTM_SEARCH_QUERY='from:no-reply@paytm.com "Payment Received" newer_than:30d'
+PAYTM_MERCHANT_EMAIL_FROM=no-reply@paytm.com
+PAYTM_FORWARDER_EMAIL=
+PAYTM_EXPECTED_MERCHANT_NAME=KAYEF AHAMAD
+```
+
+Paytm merchant emails are fetched into the verification inbox but **never
+auto-approve** a member payment. This format contains a Paytm Order ID, not the
+payer-bank UPI/UTR reference extracted from the member proof, so matching by
+amount and time would be unsafe. HDFC remains the only automatic-approval
+source until Paytm supplies a stable payer UTR that can be matched exactly.
 
 ## Screenshot OCR and reconciliation
 
@@ -103,9 +128,9 @@ never sufficient. Authentication failures stay in manual review.
 
 Drive backup and payment verification may use different Google accounts. Set
 `GOOGLE_OWNER_EMAIL` to the BNC Drive owner and set
-`GMAIL_VERIFICATION_ACCOUNT_EMAIL` to the BNC mailbox receiving forwarded HDFC
-alerts. The backend queries only `GMAIL_HDFC_SEARCH_QUERY`; use an exact
-sender and a dedicated Gmail label to limit processing:
+`GMAIL_VERIFICATION_ACCOUNT_EMAIL` to the BNC mailbox receiving forwarded
+payment alerts. The backend queries each configured payment-source query; use
+exact senders and dedicated Gmail labels to limit processing:
 
 ```env
 GMAIL_HDFC_SEARCH_QUERY="label:BNC-HDFC from:alerts@hdfcbank.bank.in newer_than:30d"

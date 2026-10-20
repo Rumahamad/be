@@ -22,7 +22,7 @@ class OrganizationSettingsOutput(BaseModel):
     payment_upi_id: str | None
     payment_mobile: str | None
     whatsapp_group_url: str | None
-    default_language: Literal["en", "bn", "ur"]
+    default_language: Literal["en", "bn", "ur", "pr"]
     default_theme: Literal["bnc-green", "night"]
     expense_visibility: Literal["HIDDEN", "SUMMARY", "DETAILS"]
     expense_visible_fields: list[str]
@@ -35,7 +35,7 @@ class UpdateOrganizationSettingsInput(BaseModel):
     payment_upi_id: str | None = Field(default=None, max_length=150)
     payment_mobile: str | None = Field(default=None, max_length=30)
     whatsapp_group_url: str | None = Field(default=None, max_length=500)
-    default_language: Literal["en", "bn", "ur"] | None = None
+    default_language: Literal["en", "bn", "ur", "pr"] | None = None
     default_theme: Literal["bnc-green", "night"] | None = None
     expense_visibility: Literal["HIDDEN", "SUMMARY", "DETAILS"] | None = None
     expense_visible_fields: list[str] | None = Field(default=None, max_length=20)

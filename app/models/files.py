@@ -12,7 +12,7 @@ from app.models.mixins import TimestampMixin
 class File(Base, TimestampMixin):
     __tablename__ = "files"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    storage_provider: Mapped[str] = mapped_column(String(30), default="SUPABASE")
+    storage_provider: Mapped[str] = mapped_column(String(30), default="LOCAL")
     bucket_name: Mapped[str] = mapped_column(String(100))
     object_key: Mapped[str] = mapped_column(String(500), unique=True)
     original_name: Mapped[str] = mapped_column(String(255))

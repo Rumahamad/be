@@ -183,3 +183,8 @@ cython_debug/
 # Recovery archives contain private member and financial data.
 BNC_BACKUP/
 backups/
+
+# Local database, private uploads, keys, and migration exports.
+.local/
+.env.local
+.env.*.local

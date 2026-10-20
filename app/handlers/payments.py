@@ -37,15 +37,14 @@ class PaymentHandler:
         )
         if not user_has_permission(db, user, required):
             raise HTTPException(status_code=403, detail=f"Missing permission: {required}")
-        auto_approve = user_has_permission(db, user, permissions.PAYMENT_APPROVE)
-        payment = self.payments.submit(db, user.id, payload, auto_approve=auto_approve)
+        payment = self.payments.submit(db, user.id, payload)
         self.audit.record(
             db,
             actor_user_id=user.id,
             action="payment.created",
             entity_type="payment",
             entity_id=payment.id,
-            after_data={"revision": 1, "auto_approved": auto_approve},
+            after_data={"revision": 1, "auto_approved": False, "proof_required": True},
         )
         return payment
 

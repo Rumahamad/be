@@ -19,8 +19,8 @@ from app.constants import permissions
 from app.constants.permissions import PAYMENT_APPROVE, PAYMENT_REJECT, PAYMENT_REVERSE
 from app.db.session import get_db
 from app.handlers.payments import PaymentHandler
-from app.jobs.push_notifications import process_push_outbox
 from app.jobs.payment_verification import process_payment_proof
+from app.jobs.push_notifications import process_push_outbox
 from app.models.enums import PaymentStatus
 from app.models.identity import User
 from app.schemas.payments import (
@@ -32,16 +32,20 @@ from app.schemas.payments import (
     PaymentListOutput,
     PaymentOutput,
     PaymentQueueItem,
+    ReceiptEmailOutput,
     RejectPaymentInput,
     ReversePaymentInput,
 )
+from app.services.email_service import EmailDeliveryError
 from app.services.payment_file_service import PaymentFileService
+from app.services.receipt_delivery_service import ReceiptDeliveryService
 from app.services.receipt_service import ReceiptService
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 handler = PaymentHandler()
 file_service = PaymentFileService()
 receipt_service = ReceiptService()
+receipt_delivery_service = ReceiptDeliveryService()
 
 
 def output(payment) -> PaymentOutput:
@@ -158,6 +162,32 @@ def download_receipt(
         headers={
             "Content-Disposition": f'attachment; filename="{receipt.receipt_no}.pdf"'
         },
+    )
+
+
+@router.post("/{payment_id}/receipt/email", response_model=ReceiptEmailOutput)
+def email_receipt(
+    payment_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> ReceiptEmailOutput:
+    # Reuse the same object-level authorization as the detail and download routes.
+    handler.detail(db, user, payment_id)
+    try:
+        result = receipt_delivery_service.send(db, actor=user, payment_id=payment_id)
+        commit(db)
+    except HTTPException:
+        # Receipt rendering/status failures recorded by the service are audit-worthy too.
+        commit(db)
+        raise
+    except EmailDeliveryError as exc:
+        # Preserve the failure audit entry while returning a safe operational error.
+        commit(db)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return ReceiptEmailOutput(
+        status="SENT",
+        receipt_no=result.receipt_no,
+        recipient=result.recipient,
     )
 
 

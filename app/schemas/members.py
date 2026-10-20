@@ -86,7 +86,7 @@ class MemberOutput(BaseModel):
     mobile: str | None
     role_code: str
     status: str
-    language: Literal["en", "bn", "ur"]
+    language: Literal["en", "bn", "ur", "pr"]
     theme: Literal["bnc-green", "night"]
     profile_picture_url: str | None = None
 

@@ -3,6 +3,7 @@ name = "bnc-api"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+  "bcrypt>=4.2",
   "alembic>=1.14",
   "cryptography>=42",
   "fastapi>=0.115",

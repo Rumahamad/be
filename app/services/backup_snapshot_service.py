@@ -6,6 +6,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, text
+from app.config.settings import get_settings
 
 from app.db.session import Base, engine
 from app.engines.backup.archive import finish_manifest, write_artifact, write_dataset
@@ -14,7 +15,7 @@ from app.models import (  # noqa: F401
     announcements, audit, communications, expense_reversals, expenses,
     files, fund, identity, payments, reversals, settings,
 )
-from app.services.storage_service import StorageError, SupabaseStorageService
+from app.services.storage_service import StorageError, StorageService
 
 # Explicit inventory: new tables require a backup policy review. Auth, live delivery
 # queues and push credentials intentionally do not belong in recovery artifacts.
@@ -61,6 +62,10 @@ def create_local_snapshot(destination: Path, run_id=None, *, include_evidence: b
         with connection.begin():
             connection.execute(text("SET TRANSACTION READ ONLY"))
             source_cutoff = connection.scalar(text("SELECT transaction_timestamp()"))
+            if get_settings().auth_provider == "local" and include_evidence:
+                from app.services.local_recovery_service import write_local_recovery
+                snapshot_id = connection.scalar(text("SELECT pg_export_snapshot()"))
+                artifacts.extend(write_local_recovery(root, get_settings(), snapshot_id))
             migration = connection.execute(text("SELECT version_num FROM alembic_version"))
             versions = sorted(migration.scalars().all())
             for name in DATASETS:
@@ -87,11 +92,9 @@ def create_local_snapshot(destination: Path, run_id=None, *, include_evidence: b
                 artifacts.append(write_dataset(root, name, rows))
                 if name == "files":
                     file_rows = rows
-    storage = SupabaseStorageService()
     for row in file_rows if include_evidence else ():
         try:
-            if row["storage_provider"] != "SUPABASE":
-                raise ValueError("Unsupported evidence provider")
+            storage = StorageService(provider=row["storage_provider"])
             content, _ = storage.download(row["bucket_name"], row["object_key"])
             if len(content) != row["size_bytes"]:
                 raise ValueError("Evidence size mismatch")
@@ -109,10 +112,18 @@ def create_local_snapshot(destination: Path, run_id=None, *, include_evidence: b
         "status": "PARTIAL" if errors else "EXPORTED", "errors": errors,
         "table_schemas": table_schemas,
         "scope": "BNC business tables and registered evidence",
-        "exclusions": ["Supabase Auth credentials/sessions", "push subscriptions",
+        "local_recovery_included": get_settings().auth_provider == "local" and include_evidence,
+        "exclusions": (["Backup encryption key (retain separately)"]
+                       if get_settings().auth_provider == "local" and include_evidence else
+                       ["Supabase Auth credentials/sessions", "push subscriptions",
                        "notification delivery queues", "deployment secrets",
                        "unregistered storage objects", "source code",
-                       *([] if include_evidence else ["binary evidence (Sheets mirror only)"])],
-        "auth_recovery": "Reprovision/relink identities for a new Supabase project",
+                       *([] if include_evidence else ["binary evidence (Sheets mirror only)"])]),
+        "auth_recovery": ("Restore encrypted local database and configuration; revoke sessions"
+                          if get_settings().auth_provider == "local" else
+                          "Reprovision/relink identities for a new Supabase project"),
     }, artifacts)
+    if get_settings().auth_provider == "local" and include_evidence:
+        from app.services.local_recovery_service import seal_local_manifest
+        seal_local_manifest(root, get_settings())
     return root
