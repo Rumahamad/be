@@ -28,10 +28,7 @@ from app.schemas.auth import (
     RecoverPasswordInput,
     SetPasswordInput,
 )
-from app.services.admin_session_handoff_service import (
-    AdminSessionHandoffConfigurationError,
-    AdminSessionHandoffService,
-)
+from app.services.admin_session_handoff_service import AdminSessionHandoffService
 from app.services.auth_service import AuthProviderError
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -157,13 +154,10 @@ def mobile_admin_session(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> MobileAdminSessionTicketOutput:
+    if get_settings().auth_provider != "supabase":
+        raise HTTPException(status_code=503, detail="Android admin handoff requires Supabase Auth")
     require_admin(db, user)
-    try:
-        ticket, expires_at = admin_session_handoffs.issue(
-            db, user.id, payload.refresh_token
-        )
-    except AdminSessionHandoffConfigurationError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    ticket, expires_at = admin_session_handoffs.issue(db, user.id)
     response.headers["Cache-Control"] = "no-store"
     return MobileAdminSessionTicketOutput(ticket=ticket, expires_at=expires_at)
 
@@ -174,24 +168,33 @@ def exchange_mobile_admin_session(
     response: Response,
     db: Session = Depends(get_db),
 ) -> AuthTokenOutput:
-    try:
-        handoff = admin_session_handoffs.consume(db, payload.ticket)
-    except AdminSessionHandoffConfigurationError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    if handoff is None:
+    if get_settings().auth_provider != "supabase":
+        raise HTTPException(status_code=503, detail="Android admin handoff requires Supabase Auth")
+    user_id = admin_session_handoffs.consume(db, payload.ticket)
+    if user_id is None:
         raise HTTPException(status_code=401, detail="Admin session ticket is invalid or expired")
 
-    user_id, refresh_token = handoff
     user = db.get(User, user_id)
     if not user or user.status != UserStatus.ACTIVE:
         raise HTTPException(status_code=403, detail="Admin account is unavailable")
     require_admin(db, user)
 
-    session = handler.refresh(db, refresh_token)
-    refreshed_user = access_token_user(session.access_token, db)
-    if refreshed_user.id != user_id:
+    try:
+        provider_session = handler.auth.create_independent_session(user.email)
+    except AuthProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    session = handler.accept_oauth_session(
+        db,
+        OAuthSessionInput(
+            access_token=provider_session.access_token,
+            refresh_token=provider_session.refresh_token,
+            expires_in=provider_session.expires_in,
+        ),
+    )
+    web_user = access_token_user(session.access_token, db)
+    if web_user.id != user_id:
         raise HTTPException(status_code=401, detail="Admin session ticket is invalid")
-    require_admin(db, refreshed_user)
+    require_admin(db, web_user)
 
     set_refresh_cookie(response, session.refresh_token)
     response.headers["Cache-Control"] = "no-store"

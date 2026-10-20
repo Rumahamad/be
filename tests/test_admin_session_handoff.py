@@ -3,7 +3,6 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from cryptography.fernet import Fernet
 from fastapi import HTTPException, Response
 from pydantic import ValidationError
 from sqlalchemy import create_engine, select
@@ -27,6 +26,22 @@ def admin_user():
         id=uuid4(),
         role_id=uuid4(),
         status=UserStatus.ACTIVE,
+        email="admin@example.test",
+    )
+
+
+@pytest.fixture(autouse=True)
+def supabase_settings(monkeypatch):
+    monkeypatch.setattr(
+        auth,
+        "get_settings",
+        lambda: SimpleNamespace(
+            auth_provider="supabase",
+            auth_refresh_cookie_name="bnc_refresh_token",
+            auth_refresh_cookie_max_age=3600,
+            auth_cookie_secure=True,
+            auth_cookie_samesite="lax",
+        ),
     )
 
 
@@ -61,16 +76,17 @@ def test_admin_mint_returns_only_ticket_and_expiry(monkeypatch):
     expires_at = datetime.now(UTC) + timedelta(seconds=60)
     user = admin_user()
     db = SimpleNamespace(scalar=lambda statement: "ADMIN")
+    issued = []
     monkeypatch.setattr(auth, "user_has_permission", lambda *args: True)
     monkeypatch.setattr(
         auth.admin_session_handoffs,
         "issue",
-        lambda *args: ("a" * 43, expires_at),
+        lambda *args: (issued.append(args) or ("a" * 43, expires_at)),
     )
     response = Response()
 
     result = auth.mobile_admin_session(
-        MobileAdminSessionInput(refresh_token="refresh"),
+        MobileAdminSessionInput(refresh_token="native-refresh-must-not-be-used"),
         response,
         db,
         user,
@@ -78,7 +94,15 @@ def test_admin_mint_returns_only_ticket_and_expiry(monkeypatch):
 
     assert result == MobileAdminSessionTicketOutput(ticket="a" * 43, expires_at=expires_at)
     assert set(result.model_dump()) == {"ticket", "expires_at"}
+    assert issued == [(db, user.id)]
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_mint_refresh_token_is_optional_and_legacy_value_is_accepted():
+    assert MobileAdminSessionInput().refresh_token is None
+    assert MobileAdminSessionInput(refresh_token="legacy-client-value").refresh_token == (
+        "legacy-client-value"
+    )
 
 
 def test_exchange_rejects_client_redirect_fields():
@@ -97,22 +121,26 @@ def test_exchange_issues_web_session_and_refresh_cookie(monkeypatch):
     monkeypatch.setattr(
         auth.admin_session_handoffs,
         "consume",
-        lambda *args: (user.id, "native-refresh"),
+        lambda *args: user.id,
+    )
+    monkeypatch.setattr(
+        auth.handler.auth,
+        "create_independent_session",
+        lambda email: AuthSession("web-access", "web-refresh", 3600),
+    )
+    monkeypatch.setattr(
+        auth.handler,
+        "accept_oauth_session",
+        lambda db, payload: AuthSession(
+            payload.access_token,
+            payload.refresh_token,
+            payload.expires_in,
+        ),
     )
     monkeypatch.setattr(
         auth.handler,
         "refresh",
-        lambda *args: AuthSession("web-access", "rotated-refresh", 3600),
-    )
-    monkeypatch.setattr(
-        auth,
-        "get_settings",
-        lambda: SimpleNamespace(
-            auth_refresh_cookie_name="bnc_refresh_token",
-            auth_refresh_cookie_max_age=3600,
-            auth_cookie_secure=True,
-            auth_cookie_samesite="lax",
-        ),
+        lambda *args: pytest.fail("handoff must not rotate the native refresh token"),
     )
     response = Response()
 
@@ -124,8 +152,8 @@ def test_exchange_issues_web_session_and_refresh_cookie(monkeypatch):
 
     assert result.access_token == "web-access"
     assert result.expires_in == 3600
-    assert "rotated-refresh" not in result.model_dump_json()
-    assert "bnc_refresh_token=rotated-refresh" in response.headers["set-cookie"]
+    assert "web-refresh" not in result.model_dump_json()
+    assert "bnc_refresh_token=web-refresh" in response.headers["set-cookie"]
     assert "path=/api/v1/auth" in response.headers["set-cookie"].lower()
     assert "domain=" not in response.headers["set-cookie"].lower()
     assert response.headers["cache-control"] == "no-store"
@@ -153,12 +181,12 @@ def test_deactivated_user_cannot_exchange(monkeypatch):
     monkeypatch.setattr(
         auth.admin_session_handoffs,
         "consume",
-        lambda *args: (user.id, "native-refresh"),
+        lambda *args: user.id,
     )
     monkeypatch.setattr(
-        auth.handler,
-        "refresh",
-        lambda *args: pytest.fail("must not refresh"),
+        auth.handler.auth,
+        "create_independent_session",
+        lambda *args: pytest.fail("must not create a browser session"),
     )
 
     with pytest.raises(HTTPException) as error:
@@ -171,7 +199,7 @@ def test_deactivated_user_cannot_exchange(monkeypatch):
     assert error.value.status_code == 403
 
 
-def test_exchange_rechecks_admin_privileges_after_refresh(monkeypatch):
+def test_exchange_rechecks_admin_privileges_after_creating_session(monkeypatch):
     user = admin_user()
     role_codes = iter(["ADMIN", "MEMBER"])
     permission_checks = iter([True, False])
@@ -184,12 +212,21 @@ def test_exchange_rechecks_admin_privileges_after_refresh(monkeypatch):
     monkeypatch.setattr(
         auth.admin_session_handoffs,
         "consume",
-        lambda *args: (user.id, "native-refresh"),
+        lambda *args: user.id,
+    )
+    monkeypatch.setattr(
+        auth.handler.auth,
+        "create_independent_session",
+        lambda *args: AuthSession("web-access", "web-refresh", 3600),
     )
     monkeypatch.setattr(
         auth.handler,
-        "refresh",
-        lambda *args: AuthSession("web-access", "rotated-refresh", 3600),
+        "accept_oauth_session",
+        lambda db, payload: AuthSession(
+            payload.access_token,
+            payload.refresh_token,
+            payload.expires_in,
+        ),
     )
 
     with pytest.raises(HTTPException) as error:
@@ -202,30 +239,25 @@ def test_exchange_rechecks_admin_privileges_after_refresh(monkeypatch):
     assert error.value.status_code == 403
 
 
-def test_consume_is_atomic_and_enforces_expiry_and_replay(monkeypatch):
-    key = Fernet.generate_key().decode()
-    monkeypatch.setattr(
-        "app.services.admin_session_handoff_service.get_settings",
-        lambda: SimpleNamespace(admin_session_handoff_encryption_key=key),
-    )
+def test_consume_is_atomic_and_enforces_expiry_and_replay():
     handoffs = AdminSessionHandoffService()
     user_id = uuid4()
     engine = create_engine("sqlite://")
     try:
         AdminSessionHandoff.__table__.create(engine)
+        assert "encrypted_refresh_token" not in AdminSessionHandoff.__table__.columns
         with Session(engine) as db:
-            expired_ticket, _ = handoffs.issue(db, user_id, "expired-refresh")
+            expired_ticket, _ = handoffs.issue(db, user_id)
         with Session(engine) as db:
             expired = db.scalar(select(AdminSessionHandoff))
             assert expired.ticket_digest != expired_ticket
-            assert expired.encrypted_refresh_token != "expired-refresh"
             expired.expires_at = datetime.now(UTC) - timedelta(seconds=1)
             db.commit()
             assert handoffs.consume(db, expired_ticket) is None
 
         with Session(engine) as db:
-            ticket, _ = handoffs.issue(db, user_id, "native-refresh")
-            assert handoffs.consume(db, ticket) == (user_id, "native-refresh")
+            ticket, _ = handoffs.issue(db, user_id)
+            assert handoffs.consume(db, ticket) == user_id
             assert handoffs.consume(db, ticket) is None
     finally:
         engine.dispose()

@@ -26,7 +26,12 @@ class MobileExchangeInput(BaseModel):
 class MobileAdminSessionInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    refresh_token: str = Field(min_length=1, max_length=2048)
+    refresh_token: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2048,
+        description="Deprecated; accepted for older clients but never used or stored.",
+    )
 
 
 class MobileAdminSessionTicketOutput(BaseModel):

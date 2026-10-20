@@ -18,7 +18,6 @@ class Settings(BaseSettings):
     local_auth_access_seconds: int = 900
     local_auth_link_seconds: int = 3600
     backup_encryption_key: str = ""
-    admin_session_handoff_encryption_key: str = ""
     postgres_bin: str = ".local/postgresql/pgsql/bin"
     google_login_redirect_uri: str = "http://127.0.0.1:5173/api/v1/auth/google/callback"
     supabase_url: str = ""
