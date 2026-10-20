@@ -7,11 +7,12 @@ from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import bearer, current_user
+from app.api.dependencies import access_token_user, bearer, current_user, user_has_permission
 from app.config.settings import get_settings
+from app.constants.permissions import SETTINGS_EDIT
 from app.db.session import get_db
 from app.handlers.auth import AuthHandler
-from app.services.auth_service import AuthProviderError
+from app.models.enums import UserStatus
 from app.models.identity import Permission, Role, RolePermission, User
 from app.schemas.auth import (
     AuthTokenOutput,
@@ -19,14 +20,23 @@ from app.schemas.auth import (
     CurrentUserOutput,
     ForgotPasswordInput,
     LoginInput,
+    MobileAdminSessionExchangeInput,
+    MobileAdminSessionInput,
+    MobileAdminSessionTicketOutput,
     MobileExchangeInput,
     OAuthSessionInput,
     RecoverPasswordInput,
     SetPasswordInput,
 )
+from app.services.admin_session_handoff_service import (
+    AdminSessionHandoffConfigurationError,
+    AdminSessionHandoffService,
+)
+from app.services.auth_service import AuthProviderError
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 handler = AuthHandler()
+admin_session_handoffs = AdminSessionHandoffService()
 
 
 def set_refresh_cookie(response: Response, refresh_token: str) -> None:
@@ -48,6 +58,12 @@ def token_output(session) -> AuthTokenOutput:
         expires_in=session.expires_in,
         password_setup_required=session.password_setup_required,
     )
+
+
+def require_admin(db: Session, user: User) -> None:
+    role_code = db.scalar(select(Role.code).where(Role.id == user.role_id))
+    if role_code != "ADMIN" or not user_has_permission(db, user, SETTINGS_EDIT):
+        raise HTTPException(status_code=403, detail="Admin access required")
 
 
 @router.post("/login", response_model=AuthTokenOutput)
@@ -128,6 +144,57 @@ def mobile_exchange(payload: MobileExchangeInput, response: Response, db: Sessio
         expires_in=provider_session.expires_in,
     ))
     set_refresh_cookie(response, session.refresh_token)
+    return token_output(session)
+
+
+@router.post(
+    "/mobile/admin-session",
+    response_model=MobileAdminSessionTicketOutput,
+)
+def mobile_admin_session(
+    payload: MobileAdminSessionInput,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> MobileAdminSessionTicketOutput:
+    require_admin(db, user)
+    try:
+        ticket, expires_at = admin_session_handoffs.issue(
+            db, user.id, payload.refresh_token
+        )
+    except AdminSessionHandoffConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    response.headers["Cache-Control"] = "no-store"
+    return MobileAdminSessionTicketOutput(ticket=ticket, expires_at=expires_at)
+
+
+@router.post("/mobile/admin-session/exchange", response_model=AuthTokenOutput)
+def exchange_mobile_admin_session(
+    payload: MobileAdminSessionExchangeInput,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> AuthTokenOutput:
+    try:
+        handoff = admin_session_handoffs.consume(db, payload.ticket)
+    except AdminSessionHandoffConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if handoff is None:
+        raise HTTPException(status_code=401, detail="Admin session ticket is invalid or expired")
+
+    user_id, refresh_token = handoff
+    user = db.get(User, user_id)
+    if not user or user.status != UserStatus.ACTIVE:
+        raise HTTPException(status_code=403, detail="Admin account is unavailable")
+    require_admin(db, user)
+
+    session = handler.refresh(db, refresh_token)
+    refreshed_user = access_token_user(session.access_token, db)
+    if refreshed_user.id != user_id:
+        raise HTTPException(status_code=401, detail="Admin session ticket is invalid")
+    require_admin(db, refreshed_user)
+
+    set_refresh_cookie(response, session.refresh_token)
+    response.headers["Cache-Control"] = "no-store"
     return token_output(session)
 
 

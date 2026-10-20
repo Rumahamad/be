@@ -34,6 +34,11 @@ the CLI without changing repository visibility or upgrading the plan.
 Database migrations are applied explicitly with `python -m alembic upgrade head`;
 they do not run during builds or function startup. Migration 0023 enables RLS on
 backend-only tables; public Supabase API roles have no policies granting access.
+For Android-to-web admin handoff, configure a dedicated
+`ADMIN_SESSION_HANDOFF_ENCRYPTION_KEY` (generate with
+`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`)
+in every backend environment before enabling the client flow, then apply migration
+0024. Keep the key stable across deployments; tickets expire after 60 seconds.
 
 ## First free release limitations
 
