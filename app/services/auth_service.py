@@ -29,6 +29,9 @@ class SupabaseAuthService:
     def refresh(self, refresh_token: str) -> AuthSession:
         return self._token({"refresh_token": refresh_token}, grant_type="refresh_token")
 
+    def exchange_pkce(self, auth_code: str, code_verifier: str) -> AuthSession:
+        return self._token({"auth_code": auth_code, "code_verifier": code_verifier}, grant_type="pkce")
+
     def logout(self, access_token: str) -> None:
         api_key = self.settings.supabase_public_api_key
         if not api_key:

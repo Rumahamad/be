@@ -16,6 +16,11 @@ class OAuthSessionInput(BaseModel):
     expires_in: int = Field(default=3600, ge=1)
 
 
+class MobileExchangeInput(BaseModel):
+    auth_code: str = Field(min_length=1, max_length=2048)
+    code_verifier: str = Field(min_length=43, max_length=128, pattern=r"^[A-Za-z0-9._~-]+$")
+
+
 class AuthTokenOutput(BaseModel):
     access_token: str
     token_type: str = "bearer"

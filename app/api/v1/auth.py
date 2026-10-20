@@ -1,7 +1,7 @@
 import hmac
 from urllib.parse import urlencode, urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import select
@@ -19,6 +19,7 @@ from app.schemas.auth import (
     CurrentUserOutput,
     ForgotPasswordInput,
     LoginInput,
+    MobileExchangeInput,
     OAuthSessionInput,
     RecoverPasswordInput,
     SetPasswordInput,
@@ -98,6 +99,34 @@ def oauth_session(
     payload: OAuthSessionInput, response: Response, db: Session = Depends(get_db)
 ):
     session = handler.accept_oauth_session(db, payload)
+    set_refresh_cookie(response, session.refresh_token)
+    return token_output(session)
+
+
+@router.get("/mobile/google")
+def mobile_google(code_challenge: str = Query(min_length=43, max_length=43, pattern=r"^[A-Za-z0-9_-]+$")):
+    settings = get_settings()
+    if settings.auth_provider != "supabase":
+        raise HTTPException(status_code=503, detail="Native Google sign-in is not configured")
+    target = settings.frontend_url.rstrip("/") + "/auth/android/callback"
+    url = handler.auth.google_authorize_url(target)
+    return RedirectResponse(url + "&" + urlencode({"code_challenge": code_challenge, "code_challenge_method": "s256"}))
+
+
+@router.post("/mobile/exchange", response_model=AuthTokenOutput)
+def mobile_exchange(payload: MobileExchangeInput, response: Response, db: Session = Depends(get_db)):
+    if get_settings().auth_provider != "supabase":
+        raise HTTPException(status_code=503, detail="Native Google sign-in is not configured")
+    try:
+        provider_session = handler.auth.exchange_pkce(payload.auth_code, payload.code_verifier)
+    except AuthProviderError as exc:
+        raise HTTPException(status_code=401, detail="Google sign-in expired or was cancelled. Try again.") from exc
+    # Existing approval, status and membership checks remain authoritative.
+    session = handler.accept_oauth_session(db, OAuthSessionInput(
+        access_token=provider_session.access_token,
+        refresh_token=provider_session.refresh_token,
+        expires_in=provider_session.expires_in,
+    ))
     set_refresh_cookie(response, session.refresh_token)
     return token_output(session)
 
